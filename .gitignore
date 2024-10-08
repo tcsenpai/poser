@@ -1,0 +1,5 @@
+.env
+posture_dataset
+__pycache__
+*.h5
+
