@@ -5,3 +5,5 @@ tensorflow
 python-dotenv
 Pillow
 colorama
+transformers
+torch

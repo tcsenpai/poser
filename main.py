@@ -13,6 +13,8 @@ import queue
 import sys
 import io
 import subprocess
+from transformers import TFViTForImageClassification
+import tensorflow as tf
 
 class StreamToQueue(io.TextIOBase):
     def __init__(self, queue):
@@ -37,6 +39,7 @@ class PostureDetectionApp:
         load_dotenv()
         self.dataset_path = os.getenv('DATASET_PATH')
         self.model_path = os.getenv('MODEL_PATH')
+
 
         self.setup_ui()
         self.cameras = self.list_available_cameras()
@@ -67,9 +70,8 @@ class PostureDetectionApp:
         self.model_entry.insert(0, self.model_path)
         ttk.Button(left_frame, text="Browse", command=self.browse_model).pack(pady=5)
 
-        # ResNet option
-        self.use_resnet_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(left_frame, text="Use ResNet50", variable=self.use_resnet_var).pack(pady=5)
+        # Model Architecture Label
+        ttk.Label(left_frame, text="Model Architecture: Vision Transformer").pack(pady=5)
 
         # Train button
         self.train_button = ttk.Button(left_frame, text="Train Model", command=self.train_model)
@@ -106,6 +108,10 @@ class PostureDetectionApp:
             self.dataset_entry.insert(0, path)
 
     def browse_model(self):
+        path = filedialog.asksaveasfilename(defaultextension=".h5", filetypes=[("H5 files", "*.h5")])
+        if path:
+            self.model_entry.delete(0, tk.END)
+            self.model_entry.insert(0, path)
         path = filedialog.askopenfilename(filetypes=[("H5 files", "*.h5")])
         if path:
             self.model_entry.delete(0, tk.END)
@@ -130,41 +136,37 @@ class PostureDetectionApp:
         if camera_list:
             self.camera_combo.current(0)
 
+    def toggle_model(self):
+        if self.use_vit_var.get():
+            self.use_vit_var.set(False)
+
     def train_model(self):
         dataset_path = self.dataset_entry.get()
         model_path = self.model_entry.get()
-        use_resnet = self.use_resnet_var.get()
 
-        # Disable the train button
         self.train_button['state'] = 'disabled'
-
-        # Clear the progress text
         self.progress_text.delete('1.0', tk.END)
 
-        # Start the training in a separate thread
         self.training_thread = threading.Thread(target=self._train_model_thread, 
-                                                args=(dataset_path, model_path, use_resnet))
+                                                args=(dataset_path, model_path))
         self.training_thread.start()
 
-        # Start checking the queue for updates
         self.master.after(100, self._check_training_queue)
 
-    def _train_model_thread(self, dataset_path, model_path, use_resnet):
-        # Redirect stdout to capture print statements
+    def _train_model_thread(self, dataset_path, model_path):
         old_stdout = sys.stdout
         sys.stdout = StreamToQueue(self.training_queue)
 
         try:
             train_data, train_labels, val_data, val_labels = load_datasets(dataset_path)
-            model = PostureNet(use_resnet=use_resnet)
+            model = PostureNet()
             trained_model = train_model(model, train_data, train_labels, val_data, val_labels, None)
-            trained_model.save(model_path)
+            trained_model.save_pretrained(model_path)
 
             self.training_queue.put(("complete", f"Model saved to {model_path}"))
         except Exception as e:
             self.training_queue.put(("error", str(e)))
         finally:
-            # Restore stdout
             sys.stdout = old_stdout
 
     def _check_training_queue(self):
@@ -205,8 +207,11 @@ class PostureDetectionApp:
             messagebox.showerror("Error", "No trained model found. Please train the model first.")
             return
 
-        self.trained_model = PostureNet(use_resnet=self.use_resnet_var.get())
-        self.trained_model.load_weights(model_path)
+        try:
+            self.trained_model = TFViTForImageClassification.from_pretrained(model_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load the model: {str(e)}")
+            return
 
         camera_index = self.cameras[self.camera_combo.current()]
         self.cap = cv2.VideoCapture(camera_index)
@@ -279,6 +284,16 @@ class PostureDetectionApp:
 
         if hasattr(self, 'cap'):
             self.cap.release()
+
+def detect_posture(frame, model):
+    preprocessed = model.preprocess_input([frame])['pixel_values']
+    outputs = model.model(preprocessed, training=False)
+    prediction = tf.nn.softmax(outputs.logits)
+    
+    if prediction[0][1] > 0.5:
+        return "Good"
+    else:
+        return "Bad"
 
 if __name__ == "__main__":
     root = tk.Tk()

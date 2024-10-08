@@ -1,11 +1,29 @@
 import os
 import numpy as np
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from PIL import Image
 from colorama import Fore, init
 
 # Initialize colorama
 init(autoreset=True)
+
+def resize_and_crop(img, target_size):
+    # Resize the image while maintaining aspect ratio
+    img.thumbnail((target_size[0], target_size[0]), Image.LANCZOS)
+    
+    # Get the current size
+    width, height = img.size
+    
+    # Calculate dimensions to crop
+    left = (width - target_size[0]) // 2
+    top = (height - target_size[1]) // 2
+    right = left + target_size[0]
+    bottom = top + target_size[1]
+    
+    # Crop the image
+    img = img.crop((left, top, right, bottom))
+    
+    return img
 
 def load_datasets(dataset_path, img_size=(224, 224)):
     good_path = os.path.join(dataset_path, 'good')
@@ -18,8 +36,9 @@ def load_datasets(dataset_path, img_size=(224, 224)):
     good_images = os.listdir(good_path)
     for img_name in good_images:
         img_path = os.path.join(good_path, img_name)
-        img = load_img(img_path, target_size=img_size)
-        img_array = img_to_array(img)
+        img = Image.open(img_path).convert('RGB')
+        img = resize_and_crop(img, img_size)
+        img_array = np.array(img)
         data.append(img_array)
         labels.append(1)
 
@@ -27,8 +46,9 @@ def load_datasets(dataset_path, img_size=(224, 224)):
     bad_images = os.listdir(bad_path)
     for img_name in bad_images:
         img_path = os.path.join(bad_path, img_name)
-        img = load_img(img_path, target_size=img_size)
-        img_array = img_to_array(img)
+        img = Image.open(img_path).convert('RGB')
+        img = resize_and_crop(img, img_size)
+        img_array = np.array(img)
         data.append(img_array)
         labels.append(0)
 
